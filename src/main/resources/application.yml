@@ -39,7 +39,7 @@ springdoc:
     operations-sorter: method
 
 openweather:
-  api-key: ff7f2c50860e28c12354ef48942009d0
+  api-key: 
   geocoding-base-url: https://api.openweathermap.org/geo/1.0
   weather-base-url: https://api.openweathermap.org/data/2.5
   units: metric
