@@ -1,0 +1,271 @@
+{
+  "info": {
+    "_postman_id": "9f4b2c1e-7d3a-4c58-9a1e-3b7f0c2d6e15",
+    "name": "Pincode Weather API",
+    "description": "Weather for an Indian pincode on a date, cached in the RDBMS.\n\nSet `baseUrl` (defaults to http://localhost:8080). The `today` and `tomorrow` variables are computed per request in the Asia/Kolkata zone by pre-request scripts.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080", "type": "string" },
+    { "key": "pincode", "value": "411014", "type": "string" }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Compute today's / tomorrow's date in Asia/Kolkata (UTC+05:30) as yyyy-MM-dd.",
+          "const IST_OFFSET_MS = 330 * 60 * 1000;",
+          "const nowIst = new Date(Date.now() + IST_OFFSET_MS);",
+          "const toIso = d => d.toISOString().slice(0, 10);",
+          "pm.variables.set('today', toIso(nowIst));",
+          "pm.variables.set('tomorrow', toIso(new Date(nowIst.getTime() + 24 * 60 * 60 * 1000)));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Weather for pincode today (live → then cached)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('Body has weather and sources', () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.pincode).to.eql(pm.variables.get('pincode'));",
+              "    pm.expect(body.forDate).to.eql(pm.variables.get('today'));",
+              "    pm.expect(body.location.source).to.be.oneOf(['DATABASE', 'OPENWEATHER']);",
+              "    pm.expect(body.weatherSource).to.be.oneOf(['DATABASE', 'OPENWEATHER']);",
+              "    pm.expect(body.weather).to.have.property('observedAt');",
+              "});",
+              "console.log('weatherSource=' + pm.response.json().weatherSource + ' (run again: expect DATABASE while the row is fresh)');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/weather?pincode={{pincode}}&for_date={{today}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "weather"],
+          "query": [
+            { "key": "pincode", "value": "{{pincode}}" },
+            { "key": "for_date", "value": "{{today}}" }
+          ]
+        },
+        "description": "First call geocodes and fetches live weather (`weatherSource: OPENWEATHER`). Repeat within `weather.same-day-refresh-after` and it is served from the DB (`weatherSource: DATABASE`)."
+      }
+    },
+    {
+      "name": "Weather for pincode on 2020-10-15",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 404 (no stored history) or 200 (row exists)', () => {",
+              "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+              "});",
+              "if (pm.response.code === 404) {",
+              "    pm.test('Error body is well formed', () => {",
+              "        const body = pm.response.json();",
+              "        pm.expect(body.status).to.eql(404);",
+              "        pm.expect(body.path).to.eql('/api/v1/weather');",
+              "    });",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/weather?pincode={{pincode}}&for_date=2020-10-15",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "weather"],
+          "query": [
+            { "key": "pincode", "value": "{{pincode}}" },
+            { "key": "for_date", "value": "2020-10-15" }
+          ]
+        },
+        "description": "Past date. Returns 404 unless a weather_record row for (pincode, 2020-10-15) was stored on that day; the free Current Weather API cannot backfill history."
+      }
+    },
+    {
+      "name": "Invalid pincode",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+              "pm.test('Violation on pincode', () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(400);",
+              "    pm.expect(body.violations[0].field).to.eql('pincode');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/weather?pincode=abc&for_date={{today}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "weather"],
+          "query": [
+            { "key": "pincode", "value": "abc" },
+            { "key": "for_date", "value": "{{today}}" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Invalid date format",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+              "pm.test('Explains the ISO format', () => {",
+              "    pm.expect(pm.response.json().message).to.eql('for_date must be in ISO format yyyy-MM-dd');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/weather?pincode={{pincode}}&for_date=15-10-2020",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "weather"],
+          "query": [
+            { "key": "pincode", "value": "{{pincode}}" },
+            { "key": "for_date", "value": "15-10-2020" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Future date",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 400', () => pm.response.to.have.status(400));",
+              "pm.test('Error body has status and path', () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(400);",
+              "    pm.expect(body.path).to.eql('/api/v1/weather');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/weather?pincode={{pincode}}&for_date={{tomorrow}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "weather"],
+          "query": [
+            { "key": "pincode", "value": "{{pincode}}" },
+            { "key": "for_date", "value": "{{tomorrow}}" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Unknown pincode 999999",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+              "pm.test('Error body has status 404', () => pm.expect(pm.response.json().status).to.eql(404));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/weather?pincode=999999&for_date={{today}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "weather"],
+          "query": [
+            { "key": "pincode", "value": "999999" },
+            { "key": "for_date", "value": "{{today}}" }
+          ]
+        },
+        "description": "Well-formed pincode the geocoder does not know. Requires a configured OPENWEATHER_API_KEY (otherwise 503)."
+      }
+    },
+    {
+      "name": "Swagger JSON",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('Describes the weather endpoint', () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.info.title).to.eql('Pincode Weather API');",
+              "    pm.expect(body.paths).to.have.property('/api/v1/weather');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{baseUrl}}/v3/api-docs", "host": ["{{baseUrl}}"], "path": ["v3", "api-docs"] }
+      }
+    },
+    {
+      "name": "Health",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('Status is UP', () => pm.expect(pm.response.json().status).to.eql('UP'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{baseUrl}}/actuator/health", "host": ["{{baseUrl}}"], "path": ["actuator", "health"] }
+      }
+    }
+  ]
+}
